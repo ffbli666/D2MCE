@@ -1,0 +1,269 @@
+/*
+ 	SOR(successive over relaxation)
+    d2mce version & 8 direction
+    version: 1.0
+    date: 2008/6/18
+    author: Zong Ying Lyu
+*/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/time.h>
+#include "../../include/d2mce.h"
+
+#define RANDOM_SEED	3838
+#define SIZE		128
+#define OMEGA		0.5
+#define EPS			1.0e-5
+#define ITERATIONS	100//3600
+#define NODES		1
+#define OPENMP
+int startend(int myid,int nodes, int totalsize ,int* start,int* end)
+{
+	int block_size;
+	block_size = totalsize / nodes;
+	if( totalsize % nodes != 0)
+		block_size ++;
+	if (block_size % 2 != 0)
+		block_size ++;
+	*start = myid * block_size;
+	*end = *start + block_size;
+	if (*end > totalsize)
+		*end = totalsize;
+	return 1;
+}
+
+
+
+int print_usage()
+{
+	printf(" Usage: sor_d2mce [options]\n");
+	printf(" Option:\n");
+	printf(" \t[ -s <vector size> ] (default: %d)\n", SIZE);
+	printf(" \t[ -n <number of nodes> ] (default: %d)\n", NODES);
+	printf(" \t[ -i <iterations> ] (default: %d)\n", ITERATIONS);
+
+	return 1;
+}
+
+int main(int argc, char *argv[])
+{
+	int i,j,k;
+	int n;
+	int iterations;
+	FILE *file;
+	double time;
+	double omega;
+	double eps;
+	double temp,err1;
+	int node_id;
+	int nodes;
+	int start;
+	int end;
+	double **send;
+	double **send2;
+	double *data;
+	double *_data;
+	double *g_err;
+	char name[4];
+	int row_size;
+	d2mce_barrier_t b1;
+	d2mce_mutex_t m1;
+	d2mce_sem_t **sem;
+	nodes = NODES;
+	n = SIZE;
+	eps = EPS;
+	omega = OMEGA;
+	iterations = ITERATIONS;
+
+	if (argc > 1) {
+		for ( i = 1 ; i < argc ;) {
+			if (strcmp(argv[i],"-s") == 0) {
+				n = atoi(argv[i+1]);
+				n = n;
+				i+=2;
+			} else if (strcmp(argv[i],"-n") == 0) {
+				nodes = atoi(argv[i+1]);
+				i+=2;
+			} else if (strcmp(argv[i],"-i") == 0) {
+				iterations = atoi(argv[i+1]);
+				i+=2;
+			} else {
+				print_usage();
+				return 0;
+			}
+		}
+	}
+	//init
+	printf("init...\n");
+	d2mce_init();
+	node_id = d2mce_join("sor","d2mce_orig", 0);
+	printf("my node id:%d\n", node_id);
+	startend(node_id, nodes, n, &start, &end);
+	start++;
+	printf("start %d end %d\n", start, end);
+	d2mce_mutex_init(&m1,"m1");
+	d2mce_barrier_init(&b1,"b1");
+	data = d2mce_malloc("data", sizeof(double)* (n+2) * (n+2));
+	_data = malloc(sizeof(double)* (n+2) * (n+2));
+	g_err = d2mce_malloc("g_err", sizeof(double));
+	send= (double **)malloc(sizeof(double*) * nodes);
+	send2 = (double **)malloc(sizeof(double*) * nodes);
+	sem = (d2mce_sem_t **)malloc(sizeof(d2mce_sem_t*) * nodes);
+	for (i=0;i<nodes;i++) {
+		sem[i] = (d2mce_sem_t*)malloc(sizeof(d2mce_sem_t));
+		snprintf(name, 3,"b%d", i);
+		d2mce_sem_init(sem[i], name , 0);
+		snprintf(name , 4, "s1%d", i);
+		send[i] = (double*)d2mce_malloc(name, sizeof(double)* (n+3));
+       	snprintf(name , 4, "s2%d", i);
+        send2[i] = (double*)d2mce_malloc(name, sizeof(double)* (n+3));
+
+	}
+	//read data
+	if (node_id == 0) {
+		file = fopen("input.data","r");
+		if (file==NULL) {
+			printf("can't not open the input.data file\n");
+			return -1;
+		}
+		fread(data, sizeof(double), (n+2)*(n+2), file);
+		fclose(file);
+		*g_err = 0;
+	} else {
+		d2mce_load(g_err);
+		d2mce_load(data);
+		d2mce_sethome(send[node_id]);
+		d2mce_sethome(send2[node_id]);
+	}
+	memcpy(_data, data, sizeof(double)*(n+2)*(n+2));
+	d2mce_barrier(&b1, nodes);
+	row_size = n+2;
+	//processing
+	printf("d2mce SOR processing...\n");
+	time = -d2mce_time();
+	for (k=1; k<iterations; k++)  {
+		printf("%d \n",k);
+		err1 = 0.0;
+		//get up node's end dataA
+
+		if (node_id < (nodes-1)) {
+			d2mce_acq();
+			for (j=0; j<=(n+1); j++) {
+				send[node_id][j] = _data[end*row_size+j];
+			}
+			d2mce_store(send[node_id]);
+			d2mce_sem_post(sem[node_id]);
+		}
+		if (node_id > 0) {
+			d2mce_sem_wait(sem[node_id-1]);
+			d2mce_load( send[node_id-1] );
+			for (j=0; j<=(n+1); j++) {
+				_data[(start-1)*row_size+j] = send[node_id-1][j];
+			}
+		}
+
+		//white
+		// i == columnA
+#ifdef OPENMP
+	    #pragma omp parallel for private(temp, j)
+#endif
+		for (i=start; i<=end; i+=2)  {
+			// j == row
+			for (j=1; j<=n; j++)  {
+	            temp=0.125*( _data[(i-1)*row_size+j]+_data[(i+1)*row_size+j]+_data[i*row_size+j-1]+_data[i*row_size+j+1]+
+    		 	             _data[(i-1)*row_size+j-1]+_data[(i-1)*row_size+j+1]+_data[(i+1)*row_size+j-1]+_data[(i+1)*row_size+j+1] )-_data[i*row_size+j];
+
+				_data[i*row_size+j]+=omega*temp;
+				if (temp < 0)
+					temp=-temp;
+				if (temp > err1)
+					err1=temp;
+			}
+		}
+//		d2mce_barrier(&b1, nodes);
+		//get next node's start data
+		if (node_id > 0) {
+			d2mce_acq();
+			for (j=0; j<=(n+1); j++) {
+				send2[node_id][j] = _data[start*row_size+j];
+			}
+			d2mce_store(send2[node_id]);
+			d2mce_sem_post(sem[node_id]);
+		}
+		if (node_id < (nodes-1)) {
+			d2mce_sem_wait(sem[node_id+1]);
+			d2mce_load( send2[node_id+1] );
+			for (j=0; j<=(n+1); j++) {
+				_data[(end+1)*row_size+j] = send2[node_id+1][j];
+			}
+		}
+
+		//black
+#ifdef OPENMP
+        #pragma omp parallel for private(temp, j)
+#endif
+
+		for (i=start+1; i<=end; i+=2)  {
+			for (j=1; j<=n; j++)  {
+		        temp=0.125*( _data[(i-1)*row_size+j]+_data[(i+1)*row_size+j]+_data[i*row_size+j-1]+_data[i*row_size+j+1]+
+        	                 _data[(i-1)*row_size+j-1]+_data[(i-1)*row_size+j+1]+_data[(i+1)*row_size+j-1]+_data[(i+1)*row_size+j+1] )-_data[i*row_size+j];
+
+				_data[i*row_size+j]+=omega*temp;
+				if (temp < 0)
+					temp=-temp;
+				if (temp > err1)
+					err1=temp;
+			}
+		}
+		*g_err = 0.0;
+		//get max err1;
+		d2mce_mutex_lock(&m1);
+		d2mce_load(g_err);
+		if (err1 > *g_err) {
+			*g_err = err1;
+			d2mce_store(g_err);
+		}
+		d2mce_mutex_unlock(&m1);
+		d2mce_barrier(&b1, nodes);
+		d2mce_load(g_err);
+		if (*g_err <= eps)
+			break;
+//		d2mce_barrier(&b1, nodes);
+
+	}
+	// get all data
+	d2mce_mutex_lock(&m1);
+	d2mce_load(data);
+/*
+#ifdef OPENMP
+        #pragma omp parallel for private(temp, j)
+#endif
+*/
+	for (i = start; i <= end; i++)
+		for (j = 0; j <= (n+1); j++)
+			data[i*row_size+j] = _data[i*row_size+j];
+	d2mce_store(data);
+	d2mce_mutex_unlock(&m1);
+	d2mce_barrier(&b1, nodes);
+	if (node_id == 0)
+		d2mce_load(data);
+
+	time+=d2mce_time();
+	printf("\n====================================================\n");
+	printf("Result:\n");
+	printf("\tTIME\tVector_Size\tLoops\tErr\n");
+	printf("\t%f\t%d\t%d\t%.5e\n", time, n, k, *g_err);
+	file = fopen("d2mce_output.data","w");
+	if (file == NULL) {
+		printf("can't not open signal_output.data\n");
+		return -1;
+	}
+	fwrite(data, sizeof(double), (n+2)*(n+2), file);
+	fclose(file);
+	print_overhead();
+	d2mce_finalize();
+
+	return 0;
+}
