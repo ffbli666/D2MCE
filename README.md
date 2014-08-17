@@ -12,6 +12,7 @@ socket) or Message Passing Interface (MPI) to transmit information.
 
 ## Document
 http://ir.ntut.edu.tw/ir/retrieve/35374/ntut-98-95598029-1.pdf
+
 http://www.slideshare.net/ZongYingLyu/ss-37804388
 
 
