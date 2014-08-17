@@ -32,8 +32,8 @@ make
 
 ## Example
 ```javascript
-cd examples
+cd examples/app
 make
-./examples
+./app
 
 ```
