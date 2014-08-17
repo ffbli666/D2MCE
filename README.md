@@ -1,6 +1,5 @@
-# D2MCE
-=====
-
+D2MCE
+===========
 ## Description
 Dynamic Distributed Mobile Computing Environment (D2MCE) designed for
 mobile device environment. It’s can dynamic join and leave the distributed computing
