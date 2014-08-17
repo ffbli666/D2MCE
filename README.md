@@ -16,6 +16,7 @@ http://www.slideshare.net/ZongYingLyu/ss-37804388
 
 
 ## Make library & demon
+Only in 32bit linux. ex: ubuntu 14.04 32bit
 ```javascript
 cp conf/d2mce.conf ~/.d2mce_conf/
 cd src/
