@@ -10,9 +10,9 @@ network parallel computing program. D2MCE is easier than use message passing (ex
 socket) or Message Passing Interface (MPI) to transmit information.
 
 ## Document
-https://drive.google.com/file/d/0B0kAz7usd295NTIxMWJjZTctYmQzNy00MDBjLTlhZGMtMWJiM2VjZDYwZDZl
+[PDF](https://drive.google.com/file/d/0B0kAz7usd295NTIxMWJjZTctYmQzNy00MDBjLTlhZGMtMWJiM2VjZDYwZDZl)
 
-http://www.slideshare.net/ZongYingLyu/ss-37804388
+[PPT](http://www.slideshare.net/ZongYingLyu/ss-37804388)
 
 
 ## Make library & demon
